@@ -1,0 +1,6 @@
+sku,barcode,name,description,category_code,uom,unit_cost,unit_price,min_stock_level,max_stock_level,reorder_point,weight_kg,volume_cbm
+ELEC-DRN-001,893521094001,Pro Surveillance Drone,High altitude industrial camera drone,ELECTRONICS,PCS,350.00,599.99,10,100,20,1.250,0.0150
+ELEC-BAT-002,893521094002,Lithium Battery Pack 5000mAh,High capacity replacement battery,PARTS,PCS,25.50,49.99,50,500,100,0.350,0.0020
+TOOL-WRN-101,893521094003,Industrial Ratchet Wrench Set 24pc,Chrome vanadium steel mechanic toolkit,TOOLS,BOX,45.00,89.50,15,80,25,3.200,0.0220
+MED-FAK-501,893521094004,First Aid Trauma Response Kit,OSHA compliant workplace medical kit,SAFETY,BOX,65.00,120.00,20,150,30,1.800,0.0180
+HVAC-FLT-202,893521094005,HEPA Cleanroom Air Filter 24x24,Industrial filtration standard,FILTRATION,PCS,38.00,75.00,25,200,40,0.950,0.0350

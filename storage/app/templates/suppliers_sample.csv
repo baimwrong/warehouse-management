@@ -1,0 +1,5 @@
+code,name,contact_person,email,phone,address,city,country,tax_id,payment_terms
+SUPP-TECH-01,Global Tech Components Ltd,Marcus Vance,sales@globaltech.com,+1-555-019-2834,104 Industrial Way,San Jose,United States,US-9481726,Net 30
+SUPP-AERO-02,Precision Avionics Dynamics,Elena Rostova,orders@precision-aero.com,+1-555-028-4910,88 Aerospace Blvd,Seattle,United States,US-8841920,Net 60
+SUPP-TOOL-03,Titan Industrial Tools Inc,Kenji Sato,info@titantools.com,+1-555-037-1829,420 Forge St,Detroit,United States,US-7738192,Net 15
+SUPP-MED-04,BioShield Safety Supplies,Sarah Jenkins,orders@bioshield.com,+1-555-046-2918,500 Health Pkwy,Boston,United States,US-6629104,Net 30

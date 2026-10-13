@@ -1,0 +1,6 @@
+warehouse_code,location_code,sku,quantity,batch_number,unit_cost,notes
+WH-CENTRAL,WH01-ZN-A-R01-S01-B01,ELEC-DRN-001,25,BATCH-2026-A1,350.00,Initial stock balance
+WH-CENTRAL,WH01-ZN-A-R01-S01-B02,ELEC-BAT-002,150,BATCH-2026-B2,25.50,Initial stock balance
+WH-CENTRAL,WH01-ZN-B-R02-S01-B01,TOOL-WRN-101,40,BATCH-2026-C1,45.00,Initial stock balance
+WH-CENTRAL,WH01-ZN-B-R02-S01-B02,MED-FAK-501,30,BATCH-2026-D1,65.00,Initial stock balance
+WH-CENTRAL,WH01-ZN-C-R01-S01-B01,HVAC-FLT-202,60,BATCH-2026-E1,38.00,Initial stock balance
