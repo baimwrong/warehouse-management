@@ -395,6 +395,10 @@ class BulkImportService
                 // Pad missing fields with null
                 $data = array_pad($data, count($header), null);
                 $rows[] = array_combine($header, array_map('trim', $data));
+            } else {
+                // Trim surplus trailing columns
+                $trimmedData = array_slice($data, 0, count($header));
+                $rows[] = array_combine($header, array_map('trim', $trimmedData));
             }
         }
 

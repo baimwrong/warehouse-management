@@ -54,9 +54,14 @@ class StorageLocationController extends Controller
 
     public function store(Request $request)
     {
+        $warehouseId = $request->input('warehouse_id');
+
         $validated = $request->validate([
             'warehouse_id' => 'required|exists:warehouses,id',
-            'warehouse_zone_id' => 'required|exists:warehouse_zones,id',
+            'warehouse_zone_id' => [
+                'required',
+                \Illuminate\Validation\Rule::exists('warehouse_zones', 'id')->where('warehouse_id', $warehouseId),
+            ],
             'location_code' => 'required|string|max:50|unique:storage_locations,location_code',
             'aisle' => 'nullable|string|max:20',
             'rack' => 'nullable|string|max:20',

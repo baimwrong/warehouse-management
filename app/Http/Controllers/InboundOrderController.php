@@ -127,11 +127,19 @@ class InboundOrderController extends Controller
 
     public function processReceipt(Request $request, InboundOrder $order)
     {
+        if ($order->status === 'received' || $order->status === 'cancelled') {
+            return redirect()->route('inbound.show', $order)
+                ->withErrors(['error' => 'This purchase order is already completed or cancelled.']);
+        }
+
         $validated = $request->validate([
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:inbound_order_items,id',
             'items.*.received_qty' => 'required|numeric|min:0',
-            'items.*.target_location_id' => 'required|exists:storage_locations,id',
+            'items.*.target_location_id' => [
+                'required',
+                \Illuminate\Validation\Rule::exists('storage_locations', 'id')->where('warehouse_id', $order->warehouse_id),
+            ],
             'items.*.batch_number' => 'nullable|string|max:80',
             'items.*.expiry_date' => 'nullable|date',
         ]);

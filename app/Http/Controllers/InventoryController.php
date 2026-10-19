@@ -26,11 +26,13 @@ class InventoryController extends Controller
         }
 
         if ($search) {
-            $query->whereHas('product', function ($q) use ($search) {
-                $q->where('name', 'ilike', "%{$search}%")
-                  ->orWhere('sku', 'ilike', "%{$search}%");
-            })->orWhereHas('location', function ($q) use ($search) {
-                $q->where('location_code', 'ilike', "%{$search}%");
+            $query->where(function ($sub) use ($search) {
+                $sub->whereHas('product', function ($q) use ($search) {
+                    $q->where('name', 'ilike', "%{$search}%")
+                      ->orWhere('sku', 'ilike', "%{$search}%");
+                })->orWhereHas('location', function ($q) use ($search) {
+                    $q->where('location_code', 'ilike', "%{$search}%");
+                });
             });
         }
 
@@ -43,9 +45,13 @@ class InventoryController extends Controller
     {
         $products = Product::where('is_active', true)
             ->with(['category', 'stocks.warehouse', 'stocks.location'])
-            ->get()
-            ->filter(fn($p) => $p->total_quantity_on_hand <= $p->reorder_point)
-            ->sortBy('total_quantity_on_hand');
+            ->leftJoin('inventory_stocks', 'products.id', '=', 'inventory_stocks.product_id')
+            ->select('products.*')
+            ->selectRaw('COALESCE(SUM(inventory_stocks.quantity_on_hand), 0) as total_on_hand')
+            ->groupBy('products.id')
+            ->havingRaw('COALESCE(SUM(inventory_stocks.quantity_on_hand), 0) <= products.reorder_point')
+            ->orderBy('total_on_hand')
+            ->paginate(20);
 
         return view('inventory.low-stock', compact('products'));
     }

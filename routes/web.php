@@ -16,32 +16,50 @@ use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\WarehouseController;
 use Illuminate\Support\Facades\Route;
 
-// Authentication Routes
+// Authentication Routes (with brute-force rate limiting)
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
-    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
 });
 
 // Authenticated Application Routes
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
-    // Dashboard
+    // Dashboard (accessible by all authenticated staff)
     Route::get('/', [DashboardController::class, 'index'])->name('home');
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
-    // Warehouses Management
-    Route::resource('warehouses', WarehouseController::class);
-
-    // Storage Locations & 2D Visual Map
+    // Storage Locations & 2D Visual Map (View: all staff; Create: manager/admin)
     Route::get('/locations/visual-map', [StorageLocationController::class, 'visualMap'])->name('locations.visual-map');
     Route::get('/locations', [StorageLocationController::class, 'index'])->name('locations.index');
-    Route::get('/locations/create', [StorageLocationController::class, 'create'])->name('locations.create');
-    Route::post('/locations', [StorageLocationController::class, 'store'])->name('locations.store');
+    Route::middleware('role:admin,manager')->group(function () {
+        Route::get('/locations/create', [StorageLocationController::class, 'create'])->name('locations.create');
+        Route::post('/locations', [StorageLocationController::class, 'store'])->name('locations.store');
+    });
 
-    // Products Catalog & Barcodes
+    // Warehouses Management (View: all staff; Mutations: manager/admin)
+    Route::get('/warehouses', [WarehouseController::class, 'index'])->name('warehouses.index');
+    Route::middleware('role:admin,manager')->group(function () {
+        Route::get('/warehouses/create', [WarehouseController::class, 'create'])->name('warehouses.create');
+        Route::post('/warehouses', [WarehouseController::class, 'store'])->name('warehouses.store');
+        Route::get('/warehouses/{warehouse}/edit', [WarehouseController::class, 'edit'])->name('warehouses.edit');
+        Route::put('/warehouses/{warehouse}', [WarehouseController::class, 'update'])->name('warehouses.update');
+        Route::delete('/warehouses/{warehouse}', [WarehouseController::class, 'destroy'])->name('warehouses.destroy');
+    });
+    Route::get('/warehouses/{warehouse}', [WarehouseController::class, 'show'])->name('warehouses.show');
+
+    // Products Catalog & Barcodes (View: all staff; Mutations: manager/admin)
     Route::get('/products/barcodes', [ProductController::class, 'barcodes'])->name('products.barcodes');
-    Route::resource('products', ProductController::class);
+    Route::get('/products', [ProductController::class, 'index'])->name('products.index');
+    Route::middleware('role:admin,manager')->group(function () {
+        Route::get('/products/create', [ProductController::class, 'create'])->name('products.create');
+        Route::post('/products', [ProductController::class, 'store'])->name('products.store');
+        Route::get('/products/{product}/edit', [ProductController::class, 'edit'])->name('products.edit');
+        Route::put('/products/{product}', [ProductController::class, 'update'])->name('products.update');
+        Route::delete('/products/{product}', [ProductController::class, 'destroy'])->name('products.destroy');
+    });
+    Route::get('/products/{product}', [ProductController::class, 'show'])->name('products.show');
 
     // Inventory & Batch Tracking
     Route::get('/inventory', [InventoryController::class, 'index'])->name('inventory.index');
@@ -53,38 +71,57 @@ Route::middleware('auth')->group(function () {
     Route::get('/movements/transfer', [StockMovementController::class, 'transferForm'])->name('movements.transfer');
     Route::post('/movements/transfer', [StockMovementController::class, 'processTransfer'])->name('movements.transfer.process');
 
-    // Stock Adjustments & Cycle Counts
+    // Stock Adjustments & Cycle Counts (Request: all; Approval: manager/admin)
     Route::get('/adjustments', [StockAdjustmentController::class, 'index'])->name('adjustments.index');
     Route::get('/adjustments/create', [StockAdjustmentController::class, 'create'])->name('adjustments.create');
     Route::post('/adjustments', [StockAdjustmentController::class, 'store'])->name('adjustments.store');
     Route::get('/adjustments/{adjustment}', [StockAdjustmentController::class, 'show'])->name('adjustments.show');
-    Route::post('/adjustments/{adjustment}/approve', [StockAdjustmentController::class, 'approve'])->name('adjustments.approve');
-    Route::post('/adjustments/{adjustment}/reject', [StockAdjustmentController::class, 'reject'])->name('adjustments.reject');
+    Route::middleware('role:admin,manager')->group(function () {
+        Route::post('/adjustments/{adjustment}/approve', [StockAdjustmentController::class, 'approve'])->name('adjustments.approve');
+        Route::post('/adjustments/{adjustment}/reject', [StockAdjustmentController::class, 'reject'])->name('adjustments.reject');
+    });
 
-    // Inbound Receiving / Purchase Orders
+    // Inbound Receiving / Purchase Orders (View: all staff; Actions: manager, operator, admin)
     Route::get('/inbound', [InboundOrderController::class, 'index'])->name('inbound.index');
-    Route::get('/inbound/create', [InboundOrderController::class, 'create'])->name('inbound.create');
-    Route::post('/inbound', [InboundOrderController::class, 'store'])->name('inbound.store');
+    Route::middleware('role:admin,manager,operator')->group(function () {
+        Route::get('/inbound/create', [InboundOrderController::class, 'create'])->name('inbound.create');
+        Route::post('/inbound', [InboundOrderController::class, 'store'])->name('inbound.store');
+        Route::get('/inbound/{order}/receive', [InboundOrderController::class, 'receiveForm'])->name('inbound.receive');
+        Route::post('/inbound/{order}/receive', [InboundOrderController::class, 'processReceipt'])->name('inbound.receive.process');
+    });
     Route::get('/inbound/{order}', [InboundOrderController::class, 'show'])->name('inbound.show');
-    Route::get('/inbound/{order}/receive', [InboundOrderController::class, 'receiveForm'])->name('inbound.receive');
-    Route::post('/inbound/{order}/receive', [InboundOrderController::class, 'processReceipt'])->name('inbound.receive.process');
 
-    // Outbound Dispatch / Sales Orders
+    // Outbound Dispatch / Sales Orders (View: all staff; Actions: manager, dispatcher, admin)
     Route::get('/outbound', [OutboundOrderController::class, 'index'])->name('outbound.index');
-    Route::get('/outbound/create', [OutboundOrderController::class, 'create'])->name('outbound.create');
-    Route::post('/outbound', [OutboundOrderController::class, 'store'])->name('outbound.store');
+    Route::middleware('role:admin,manager,dispatcher')->group(function () {
+        Route::get('/outbound/create', [OutboundOrderController::class, 'create'])->name('outbound.create');
+        Route::post('/outbound', [OutboundOrderController::class, 'store'])->name('outbound.store');
+        Route::get('/outbound/{order}/pick-pack', [OutboundOrderController::class, 'pickPackForm'])->name('outbound.pick-pack');
+        Route::post('/outbound/{order}/pick-pack', [OutboundOrderController::class, 'processPickPack'])->name('outbound.pick-pack.process');
+    });
     Route::get('/outbound/{order}', [OutboundOrderController::class, 'show'])->name('outbound.show');
-    Route::get('/outbound/{order}/pick-pack', [OutboundOrderController::class, 'pickPackForm'])->name('outbound.pick-pack');
-    Route::post('/outbound/{order}/pick-pack', [OutboundOrderController::class, 'processPickPack'])->name('outbound.pick-pack.process');
 
-    // Suppliers & Customers
-    Route::resource('suppliers', SupplierController::class)->except(['show', 'destroy']);
-    Route::resource('customers', CustomerController::class)->except(['show', 'destroy']);
+    // Suppliers & Customers (View: all staff; Create/Edit: manager, admin)
+    Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
+    Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
+    Route::middleware('role:admin,manager')->group(function () {
+        Route::get('/suppliers/create', [SupplierController::class, 'create'])->name('suppliers.create');
+        Route::post('/suppliers', [SupplierController::class, 'store'])->name('suppliers.store');
+        Route::get('/suppliers/{supplier}/edit', [SupplierController::class, 'edit'])->name('suppliers.edit');
+        Route::put('/suppliers/{supplier}', [SupplierController::class, 'update'])->name('suppliers.update');
 
-    // Reports & Analytics
-    Route::get('/reports/valuation', [ReportController::class, 'valuation'])->name('reports.valuation');
-    Route::get('/reports/movements', [ReportController::class, 'movements'])->name('reports.movements');
-    Route::get('/reports/utilization', [ReportController::class, 'utilization'])->name('reports.utilization');
+        Route::get('/customers/create', [CustomerController::class, 'create'])->name('customers.create');
+        Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');
+        Route::get('/customers/{customer}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
+        Route::put('/customers/{customer}', [CustomerController::class, 'update'])->name('customers.update');
+    });
+
+    // Reports & Analytics (manager, admin)
+    Route::middleware('role:admin,manager')->group(function () {
+        Route::get('/reports/valuation', [ReportController::class, 'valuation'])->name('reports.valuation');
+        Route::get('/reports/movements', [ReportController::class, 'movements'])->name('reports.movements');
+        Route::get('/reports/utilization', [ReportController::class, 'utilization'])->name('reports.utilization');
+    });
 
     // Admin Only: Bulk Data Import Center
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {

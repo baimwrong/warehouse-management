@@ -66,13 +66,13 @@ WMS Enterprise is engineered for high-throughput distribution hubs, manufacturin
 
 | Layer | Component | Version / Specification |
 |---|---|---|
-| **Framework** | Laravel Framework | **13.x / 12.x** (PHP `^8.3 || ^8.4`) |
-| **Database** | PostgreSQL | **18.x** (with JSONB, Schema Search Path & SSL mode) |
+| **Framework** | Laravel Framework | **12.x / 11.x** (PHP `^8.2 || ^8.3 || ^8.4`) |
+| **Database** | PostgreSQL / SQLite (Testing) | **PostgreSQL 17.x / 18.x** (Testing: SQLite `:memory:`) |
 | **Styling** | Bootstrap | **5.3.3** (Minified, Downloaded to `public/vendor/`) |
 | **Icons** | Bootstrap Icons | **1.11.3** (WOFF2/WOFF Fonts in `public/vendor/`) |
 | **Charts** | Chart.js | **4.4.7** (Standalone UMD in `public/vendor/`) |
-| **Barcodes** | Native PHP SVG Engine | 100% Offline Code 128 / Barcode Generator |
-| **Container** | Docker & Compose | PHP 8.4-fpm, PostgreSQL 18-alpine, Nginx, Redis |
+| **Barcodes** | Scannable Code 128 Engine | 100% Offline Standard Code 128 (Subset B) SVG Generator |
+| **Container** | Docker & Compose | PHP 8.4-fpm, PostgreSQL 17-alpine, Nginx, Redis |
 
 ---
 
@@ -319,25 +319,40 @@ Navigate to `/movements` to view the master material ledger:
 ---
 
 ## 🧪 Testing & Verification
+ 
+WMS Enterprise includes a comprehensive test suite (Unit & Feature tests) covering Authentication, RBAC, Barcode generation, Stock concurrency, Inbound receiving, Outbound fulfillment, and Cycle count approvals.
 
-WMS Enterprise includes PHPUnit and Feature tests. When running inside the container:
+Testing uses an isolated, in-memory SQLite database (`:memory:`) via `phpunit.xml` to protect production and local databases from accidental resets:
+
 ```powershell
-docker compose exec app php artisan test
+# Run the complete test suite natively:
+php artisan test
+
+# Or run via vendor phpunit:
+php vendor/phpunit/phpunit/phpunit
 ```
 
-To test syntax linting across all PHP files:
+To run individual test suites:
 ```powershell
-php -l <filename>
+php artisan test --filter=AuthAndRbacTest
+php artisan test --filter=InventoryStockTest
+php artisan test --filter=OrderFulfillmentTest
+php artisan test --filter=StockAdjustmentApprovalTest
+php artisan test --filter=BarcodeServiceTest
 ```
-*(All 45+ application PHP files have been validated with zero syntax errors).*
 
 ---
 
-## 🔒 Security Best Practices
-- **CSRF Protection**: All POST/PUT/DELETE forms include Laravel CSRF tokens.
-- **SQL Injection Prevention**: Built entirely on Eloquent ORM and PDO prepared statements with PostgreSQL parameter bindings.
-- **Password Security**: Passwords hashed using bcrypt with cost factor 12.
-- **Role Middleware**: Protected administrative routes require the `role:admin` middleware.
+## 🔒 Security & Concurrency Best Practices
+- **Brute-Force Rate Limiting**: `POST /login` is guarded with `throttle:5,1` rate limiting.
+- **Granular Role-Based Access Control (RBAC)**: All warehouse routes enforce role policies (`admin`, `manager`, `operator`, `dispatcher`) via `RoleMiddleware`.
+- **Segregation of Duties**: Requesters of stock adjustments cannot approve their own count variance adjustments; review by another manager is mandatory.
+- **Dynamic Balance Reconciliation**: Stock adjustments dynamically recalculate variance at approval time against live on-hand inventory to prevent overwriting intermediate stock changes.
+- **Concurrency & Pessimistic Locking**: `InventoryService` enforces row-level `lockForUpdate()` within transactions to eliminate race conditions.
+- **Idempotent Order State Guards**: Inbound and outbound fulfillment workflows strictly block duplicate processing of fulfilled/cancelled orders, preventing double deductions.
+- **Database Unique Constraints**: `inventory_stocks` enforces compound uniqueness on `[warehouse_id, storage_location_id, product_id, product_batch_id]`.
+- **Foreign Key Restraints**: Audit logs, orders, and stock movements use `restrictOnDelete()` to prevent accidental cascading deletion of financial and historical tracking records.
+- **CSRF & XSS Protection**: All forms contain CSRF tokens, and 2D visual maps use strictly escaped attributes.
 
 ---
 

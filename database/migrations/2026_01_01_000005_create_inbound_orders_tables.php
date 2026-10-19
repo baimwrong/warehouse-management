@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::create('inbound_orders', function (Blueprint $table) {
             $table->id();
             $table->string('order_number', 50)->unique();
-            $table->foreignId('supplier_id')->constrained('suppliers')->cascadeOnDelete();
-            $table->foreignId('warehouse_id')->constrained('warehouses')->cascadeOnDelete();
+            $table->foreignId('supplier_id')->constrained('suppliers')->restrictOnDelete();
+            $table->foreignId('warehouse_id')->constrained('warehouses')->restrictOnDelete();
             $table->string('status', 30)->default('pending_receipt'); // draft, pending_receipt, partially_received, received, cancelled
             $table->date('expected_date')->nullable();
             $table->dateTime('received_date')->nullable();
@@ -31,7 +31,7 @@ return new class extends Migration
         Schema::create('inbound_order_items', function (Blueprint $table) {
             $table->id();
             $table->foreignId('inbound_order_id')->constrained('inbound_orders')->cascadeOnDelete();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
+            $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
             $table->decimal('quantity_expected', 14, 4);
             $table->decimal('quantity_received', 14, 4)->default(0.0000);
             $table->decimal('unit_cost', 14, 4)->default(0.0000);

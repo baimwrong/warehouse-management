@@ -40,18 +40,32 @@ class InventoryService
             $userId,
             $notes
         ) {
-            $stock = InventoryStock::lockForUpdate()->firstOrCreate(
-                [
-                    'warehouse_id' => $warehouseId,
-                    'storage_location_id' => $locationId,
-                    'product_id' => $productId,
-                    'product_batch_id' => $batchId,
-                ],
-                [
-                    'quantity_on_hand' => 0.0,
-                    'quantity_reserved' => 0.0,
-                ]
-            );
+            $stock = InventoryStock::where('warehouse_id', $warehouseId)
+                ->where('storage_location_id', $locationId)
+                ->where('product_id', $productId)
+                ->where('product_batch_id', $batchId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$stock) {
+                try {
+                    $stock = InventoryStock::create([
+                        'warehouse_id' => $warehouseId,
+                        'storage_location_id' => $locationId,
+                        'product_id' => $productId,
+                        'product_batch_id' => $batchId,
+                        'quantity_on_hand' => 0.0,
+                        'quantity_reserved' => 0.0,
+                    ]);
+                } catch (\Exception $e) {
+                    $stock = InventoryStock::where('warehouse_id', $warehouseId)
+                        ->where('storage_location_id', $locationId)
+                        ->where('product_id', $productId)
+                        ->where('product_batch_id', $batchId)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+                }
+            }
 
             $stock->quantity_on_hand += $quantity;
             $stock->save();
@@ -190,18 +204,32 @@ class InventoryService
             $sourceStock->save();
 
             // Add to destination
-            $destStock = InventoryStock::lockForUpdate()->firstOrCreate(
-                [
-                    'warehouse_id' => $warehouseId,
-                    'storage_location_id' => $toLocationId,
-                    'product_id' => $productId,
-                    'product_batch_id' => $batchId,
-                ],
-                [
-                    'quantity_on_hand' => 0.0,
-                    'quantity_reserved' => 0.0,
-                ]
-            );
+            $destStock = InventoryStock::where('warehouse_id', $warehouseId)
+                ->where('storage_location_id', $toLocationId)
+                ->where('product_id', $productId)
+                ->where('product_batch_id', $batchId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$destStock) {
+                try {
+                    $destStock = InventoryStock::create([
+                        'warehouse_id' => $warehouseId,
+                        'storage_location_id' => $toLocationId,
+                        'product_id' => $productId,
+                        'product_batch_id' => $batchId,
+                        'quantity_on_hand' => 0.0,
+                        'quantity_reserved' => 0.0,
+                    ]);
+                } catch (\Exception $e) {
+                    $destStock = InventoryStock::where('warehouse_id', $warehouseId)
+                        ->where('storage_location_id', $toLocationId)
+                        ->where('product_id', $productId)
+                        ->where('product_batch_id', $batchId)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+                }
+            }
 
             $destStock->quantity_on_hand += $quantity;
             $destStock->save();

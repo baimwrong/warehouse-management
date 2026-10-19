@@ -117,14 +117,18 @@ class OutboundOrderController extends Controller
 
         $order->load(['customer', 'warehouse', 'items.product']);
 
-        // For each item, look up available storage locations with stock in this warehouse
+        // Efficiently retrieve all candidate stock rows in a single indexed query
+        $productIds = $order->items->pluck('product_id')->unique();
+        $allStocks = InventoryStock::with(['location.zone', 'batch'])
+            ->where('warehouse_id', $order->warehouse_id)
+            ->whereIn('product_id', $productIds)
+            ->where('quantity_on_hand', '>', 0)
+            ->get()
+            ->groupBy('product_id');
+
         $pickLocations = [];
         foreach ($order->items as $item) {
-            $pickLocations[$item->id] = InventoryStock::with(['location.zone', 'batch'])
-                ->where('warehouse_id', $order->warehouse_id)
-                ->where('product_id', $item->product_id)
-                ->where('quantity_on_hand', '>', 0)
-                ->get();
+            $pickLocations[$item->id] = $allStocks->get($item->product_id, collect());
         }
 
         return view('outbound.pick-pack', compact('order', 'pickLocations'));
@@ -132,12 +136,18 @@ class OutboundOrderController extends Controller
 
     public function processPickPack(Request $request, OutboundOrder $order)
     {
+        if (in_array($order->status, ['shipped', 'delivered', 'cancelled'])) {
+            return redirect()->route('outbound.show', $order)
+                ->withErrors(['error' => 'Order is already marked as shipped, delivered, or cancelled. Stock cannot be deducted again.']);
+        }
+
         $validated = $request->validate([
             'tracking_number' => 'nullable|string|max:100',
             'action' => 'required|string|in:pick,ship',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:outbound_order_items,id',
-            'items.*.source_location_id' => 'required|exists:storage_locations,id',
+            'items.*.source_location_id' => 'required|string',
+            'items.*.product_batch_id' => 'nullable|exists:product_batches,id',
             'items.*.picked_qty' => 'required|numeric|min:0',
         ]);
 
@@ -149,20 +159,44 @@ class OutboundOrderController extends Controller
                     $orderItem = $order->items()->findOrFail($itemData['item_id']);
                     $qty = (float) $itemData['picked_qty'];
 
-                    $orderItem->source_location_id = $itemData['source_location_id'];
+                    // Parse location and batch ID (supporting both integer ID and compound "location_id:batch_id")
+                    $rawLoc = (string) $itemData['source_location_id'];
+                    $batchId = !empty($itemData['product_batch_id']) ? (int) $itemData['product_batch_id'] : null;
+
+                    if (str_contains($rawLoc, ':')) {
+                        [$locStr, $batchStr] = explode(':', $rawLoc, 2);
+                        $locationId = (int) $locStr;
+                        if (!empty($batchStr)) {
+                            $batchId = (int) $batchStr;
+                        }
+                    } else {
+                        $locationId = (int) $rawLoc;
+                    }
+
+                    // Verify storage location belongs to this facility
+                    $validLocation = StorageLocation::where('id', $locationId)
+                        ->where('warehouse_id', $order->warehouse_id)
+                        ->exists();
+
+                    if (!$validLocation) {
+                        throw new Exception("Selected storage bin #{$locationId} does not belong to facility '{$order->warehouse->name}'.");
+                    }
+
+                    $orderItem->source_location_id = $locationId;
+                    $orderItem->product_batch_id = $batchId;
                     $orderItem->quantity_picked = $qty;
                     $orderItem->quantity_packed = $qty;
                     $orderItem->status = $isShipping ? 'shipped' : 'packed';
                     $orderItem->save();
 
                     if ($isShipping && $qty > 0) {
-                        // Deduct physical inventory stock
+                        // Deduct physical inventory stock with accurate batch tracking
                         $this->inventoryService->decreaseStock(
                             warehouseId: $order->warehouse_id,
-                            locationId: $itemData['source_location_id'],
+                            locationId: $locationId,
                             productId: $orderItem->product_id,
                             quantity: $qty,
-                            batchId: null,
+                            batchId: $batchId,
                             referenceType: 'outbound',
                             referenceId: $order->id,
                             unitCost: (float) $orderItem->product->unit_cost,

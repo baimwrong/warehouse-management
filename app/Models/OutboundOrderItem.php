@@ -18,6 +18,7 @@ class OutboundOrderItem extends Model
         'quantity_packed',
         'unit_price',
         'source_location_id',
+        'product_batch_id',
         'status',
     ];
 
@@ -41,5 +42,10 @@ class OutboundOrderItem extends Model
     public function sourceLocation(): BelongsTo
     {
         return $this->belongsTo(StorageLocation::class, 'source_location_id');
+    }
+
+    public function batch(): BelongsTo
+    {
+        return $this->belongsTo(ProductBatch::class, 'product_batch_id');
     }
 }

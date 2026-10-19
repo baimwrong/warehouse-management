@@ -80,5 +80,10 @@
             </tbody>
         </table>
     </div>
+    @if($products->hasPages())
+    <div class="card-footer bg-white d-flex justify-content-end py-2">
+        {{ $products->links() }}
+    </div>
+    @endif
 </div>
 @endsection

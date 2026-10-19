@@ -40,6 +40,21 @@
                 </select>
             </div>
 
+            <div class="mb-3">
+                <label for="product_batch_id" class="form-label fs-13 fw-semibold">Batch / Lot Number (Optional)</label>
+                <select name="product_batch_id" id="product_batch_id" class="form-select font-monospace">
+                    <option value="">-- No Specific Batch / Standard Stock --</option>
+                    @foreach($products as $prod)
+                        @foreach($prod->batches as $batch)
+                            <option value="{{ $batch->id }}" {{ old('product_batch_id') == $batch->id ? 'selected' : '' }}>
+                                [{{ $prod->sku }}] Lot: {{ $batch->batch_number }} @if($batch->expiry_date)(Exp: {{ $batch->expiry_date->format('Y-m-d') }})@endif
+                            </option>
+                        @endforeach
+                    @endforeach
+                </select>
+                <div class="fs-12 text-muted mt-1">Select the lot if transferring batch-tracked goods between bins.</div>
+            </div>
+
             <div class="row g-3 mb-3">
                 <div class="col-md-6">
                     <label for="from_location_id" class="form-label fs-13 fw-semibold">Source Storage Bin (From) <span class="text-danger">*</span></label>

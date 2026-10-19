@@ -37,4 +37,10 @@
     </div>
     @endforeach
 </div>
+
+@if($labels->hasPages())
+<div class="d-flex justify-content-center mt-4 no-print">
+    {{ $labels->links() }}
+</div>
+@endif
 @endsection

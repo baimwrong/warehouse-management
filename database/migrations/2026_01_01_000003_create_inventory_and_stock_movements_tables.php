@@ -21,6 +21,7 @@ return new class extends Migration
             $table->decimal('quantity_reserved', 14, 4)->default(0.0000);
             $table->timestamps();
 
+            $table->unique(['warehouse_id', 'storage_location_id', 'product_id', 'product_batch_id'], 'inv_stocks_wh_loc_prod_batch_unique');
             $table->index(['product_id', 'warehouse_id']);
             $table->index(['storage_location_id', 'product_id']);
             $table->index(['warehouse_id', 'quantity_on_hand']);
@@ -30,7 +31,7 @@ return new class extends Migration
             $table->id();
             $table->string('reference_type', 40); // inbound, outbound, transfer, adjustment, initial, cycle_count
             $table->unsignedBigInteger('reference_id')->nullable()->index();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
+            $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
             $table->foreignId('product_batch_id')->nullable()->constrained('product_batches')->nullOnDelete();
             $table->foreignId('from_location_id')->nullable()->constrained('storage_locations')->nullOnDelete();
             $table->foreignId('to_location_id')->nullable()->constrained('storage_locations')->nullOnDelete();

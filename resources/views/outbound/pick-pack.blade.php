@@ -54,8 +54,8 @@
                                 <select name="items[{{ $index }}][source_location_id]" class="form-select form-select-sm font-monospace" required>
                                     <option value="">-- Choose Source Bin with Stock --</option>
                                     @foreach($availableStocks as $stk)
-                                        <option value="{{ $stk->storage_location_id }}" {{ $item->source_location_id == $stk->storage_location_id ? 'selected' : '' }}>
-                                            {{ $stk->location->location_code }} (Available: {{ number_format($stk->available_quantity) }} {{ $item->product->uom }})
+                                        <option value="{{ $stk->storage_location_id }}:{{ $stk->product_batch_id ?? '' }}" {{ ($item->source_location_id == $stk->storage_location_id && $item->product_batch_id == $stk->product_batch_id) ? 'selected' : '' }}>
+                                            {{ $stk->location->location_code }} @if($stk->batch)[Lot: {{ $stk->batch->batch_number }}]@endif (Avail: {{ number_format($stk->available_quantity) }} {{ $item->product->uom }})
                                         </option>
                                     @endforeach
                                 </select>

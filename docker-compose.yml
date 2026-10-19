@@ -37,7 +37,7 @@ services:
       - wms_network
 
   postgres:
-    image: postgres:18-alpine
+    image: postgres:17-alpine
     container_name: wms_postgres
     restart: unless-stopped
     ports:

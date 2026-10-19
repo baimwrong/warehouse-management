@@ -103,6 +103,10 @@ class WarehouseController extends Controller
             return back()->withErrors(['error' => 'Cannot delete warehouse that still holds inventory stock. Transfer stock first.']);
         }
 
+        if ($warehouse->inboundOrders()->exists() || $warehouse->outboundOrders()->exists()) {
+            return back()->withErrors(['error' => 'Cannot delete warehouse with associated historical purchase or sales orders. Set status to inactive instead.']);
+        }
+
         $warehouse->delete();
         return redirect()->route('warehouses.index')->with('success', 'Warehouse deleted successfully.');
     }

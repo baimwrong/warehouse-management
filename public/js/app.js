@@ -22,12 +22,14 @@ document.addEventListener('DOMContentLoaded', () => {
 /**
  * Dynamic Item Row Generator for Inbound/Outbound/Adjustment Forms
  */
+window.dynamicRowCounter = window.dynamicRowCounter || 100;
 window.addItemRow = function (containerId, templateId) {
     const container = document.getElementById(containerId);
     const template = document.getElementById(templateId);
     if (!container || !template) return;
 
-    const index = container.children.length;
+    window.dynamicRowCounter++;
+    const index = window.dynamicRowCounter;
     let html = template.innerHTML.replace(/{index}/g, index);
     
     const div = document.createElement('div');

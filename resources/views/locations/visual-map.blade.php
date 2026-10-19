@@ -57,10 +57,24 @@
         <div class="card-body">
             <div class="bin-grid">
                 @forelse($zone->storageLocations as $bin)
+                @php
+                    $tipLines = ["Bin: " . $bin->location_code, "Aisle: " . ($bin->aisle ?? '-') . " | Rack: " . ($bin->rack ?? '-')];
+                    if ($bin->stocks->count() > 0) {
+                        foreach ($bin->stocks->take(4) as $stk) {
+                            $tipLines[] = "• " . ($stk->product->name ?? 'SKU') . ": " . number_format($stk->quantity_on_hand) . " " . ($stk->product->uom ?? '');
+                        }
+                        if ($bin->stocks->count() > 4) {
+                            $tipLines[] = "+ " . ($bin->stocks->count() - 4) . " more items";
+                        }
+                    } else {
+                        $tipLines[] = "(Empty Storage Bin)";
+                    }
+                    $tooltipText = implode("\n", $tipLines);
+                @endphp
                 <div class="bin-cell {{ $bin->is_occupied ? 'occupied' : 'vacant' }}" 
                      data-bs-toggle="tooltip" 
-                     data-bs-html="true" 
-                     title="<div class='text-start p-1'><strong>{{ $bin->location_code }}</strong><br>Aisle: {{ $bin->aisle ?? '-' }} | Rack: {{ $bin->rack ?? '-' }}<br>Shelf: {{ $bin->shelf ?? '-' }} | Bin: {{ $bin->bin ?? '-' }}<br><hr class='my-1'>@if($bin->stocks->count() > 0)@foreach($bin->stocks as $stk)Item: {{ $stk->product->name ?? 'SKU' }}<br>Qty: {{ number_format($stk->quantity_on_hand) }} {{ $stk->product->uom ?? '' }}<br>@endforeach @else Empty Bin @endif</div>">
+                     data-bs-placement="top"
+                     title="{{ $tooltipText }}">
                     <div class="bin-code">{{ $bin->bin ?? $bin->location_code }}</div>
                     <div class="fs-11 text-muted">{{ $bin->aisle ?? '' }}-{{ $bin->rack ?? '' }}</div>
                     <div class="mt-1">

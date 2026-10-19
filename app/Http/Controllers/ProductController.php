@@ -35,6 +35,18 @@ class ProductController extends Controller
             $query->where('category_id', $categoryId);
         }
 
+        if ($stockStatus === 'in_stock') {
+            $query->whereHas('stocks', fn($q) => $q->where('quantity_on_hand', '>', 0));
+        } elseif ($stockStatus === 'low_stock') {
+            $query->whereHas('stocks', function ($q) {
+                $q->select('product_id')
+                  ->groupBy('product_id')
+                  ->havingRaw('SUM(quantity_on_hand) <= products.reorder_point AND SUM(quantity_on_hand) > 0');
+            });
+        } elseif ($stockStatus === 'out_of_stock') {
+            $query->whereDoesntHave('stocks', fn($q) => $q->where('quantity_on_hand', '>', 0));
+        }
+
         $products = $query->orderBy('name')->paginate(15)->withQueryString();
 
         return view('products.index', compact('products', 'categories', 'search', 'categoryId', 'stockStatus'));
@@ -125,15 +137,19 @@ class ProductController extends Controller
             return back()->withErrors(['error' => 'Cannot delete product with existing inventory on hand.']);
         }
 
+        if ($product->stockMovements()->exists()) {
+            return back()->withErrors(['error' => 'Cannot delete product with existing audit stock movement history. Please deactivate it instead.']);
+        }
+
         $product->delete();
         return redirect()->route('products.index')->with('success', 'Product deleted successfully.');
     }
 
     public function barcodes(Request $request)
     {
-        $products = Product::where('is_active', true)->orderBy('name')->get();
+        $products = Product::where('is_active', true)->with('category')->orderBy('name')->paginate(24)->withQueryString();
 
-        $labels = $products->map(function ($product) {
+        $labels = $products->through(function ($product) {
             return [
                 'product' => $product,
                 'barcodeSvg' => $this->barcodeService->generateSvg($product->barcode ?? $product->sku, 200, 50),

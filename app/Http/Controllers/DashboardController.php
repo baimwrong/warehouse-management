@@ -53,12 +53,23 @@ class DashboardController extends Controller
         $pendingInbound = $inboundQuery->count();
         $pendingOutbound = $outboundQuery->count();
 
-        // Low stock products
-        $lowStockProducts = Product::where('is_active', true)
-            ->with(['stocks', 'category'])
-            ->get()
-            ->filter(fn($p) => $p->total_quantity_on_hand <= $p->reorder_point)
-            ->take(8);
+        // Low stock products via database aggregation
+        $lowStockQuery = Product::where('is_active', true)
+            ->with(['category'])
+            ->leftJoin('inventory_stocks', 'products.id', '=', 'inventory_stocks.product_id');
+
+        if ($warehouseId) {
+            $lowStockQuery->where('inventory_stocks.warehouse_id', $warehouseId);
+        }
+
+        $lowStockProducts = $lowStockQuery
+            ->select('products.*')
+            ->selectRaw('COALESCE(SUM(inventory_stocks.quantity_on_hand), 0) as calculated_stock')
+            ->groupBy('products.id')
+            ->havingRaw('COALESCE(SUM(inventory_stocks.quantity_on_hand), 0) <= products.reorder_point')
+            ->orderBy('calculated_stock')
+            ->take(8)
+            ->get();
 
         // Recent audit movements
         $recentMovements = StockMovement::with(['product', 'fromLocation', 'toLocation', 'user'])
@@ -66,7 +77,18 @@ class DashboardController extends Controller
             ->take(8)
             ->get();
 
-        // 7-day movement trend for Chart.js
+        // 7-day movement trend in a single grouped query
+        $startDate = Carbon::now()->subDays(6)->startOfDay();
+        $movementsTrend = StockMovement::selectRaw("DATE(created_at) as date_key, 
+                SUM(CASE WHEN reference_type IN ('inbound', 'initial', 'bulk_import') THEN quantity ELSE 0 END) as inbound_qty,
+                SUM(CASE WHEN reference_type = 'outbound' THEN quantity ELSE 0 END) as outbound_qty")
+            ->where('created_at', '>=', $startDate)
+            ->groupByRaw("DATE(created_at)")
+            ->get()
+            ->keyBy(function ($item) {
+                return Carbon::parse($item->date_key)->format('Y-m-d');
+            });
+
         $trendDates = [];
         $inboundCounts = [];
         $outboundCounts = [];
@@ -74,14 +96,10 @@ class DashboardController extends Controller
         for ($i = 6; $i >= 0; $i--) {
             $date = Carbon::now()->subDays($i)->format('Y-m-d');
             $trendDates[] = Carbon::now()->subDays($i)->format('M d');
+            $record = $movementsTrend->get($date);
 
-            $inboundCounts[] = (float) StockMovement::whereDate('created_at', $date)
-                ->whereIn('reference_type', ['inbound', 'initial', 'bulk_import'])
-                ->sum('quantity');
-
-            $outboundCounts[] = (float) StockMovement::whereDate('created_at', $date)
-                ->where('reference_type', 'outbound')
-                ->sum('quantity');
+            $inboundCounts[] = $record ? (float) $record->inbound_qty : 0.0;
+            $outboundCounts[] = $record ? (float) $record->outbound_qty : 0.0;
         }
 
         return view('dashboard.index', compact(

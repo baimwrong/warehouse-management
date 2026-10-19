@@ -54,18 +54,27 @@ class StockMovementController extends Controller
     public function transferForm()
     {
         $warehouses = Warehouse::where('status', 'active')->with(['zones.storageLocations'])->get();
-        $products = Product::where('is_active', true)->orderBy('name')->get();
+        $products = Product::where('is_active', true)->with('batches')->orderBy('name')->get();
 
         return view('movements.transfer', compact('warehouses', 'products'));
     }
 
     public function processTransfer(Request $request)
     {
+        $warehouseId = $request->input('warehouse_id');
+
         $validated = $request->validate([
             'warehouse_id' => 'required|exists:warehouses,id',
             'product_id' => 'required|exists:products,id',
-            'from_location_id' => 'required|exists:storage_locations,id',
-            'to_location_id' => 'required|exists:storage_locations,id|different:from_location_id',
+            'from_location_id' => [
+                'required',
+                \Illuminate\Validation\Rule::exists('storage_locations', 'id')->where('warehouse_id', $warehouseId),
+            ],
+            'to_location_id' => [
+                'required',
+                'different:from_location_id',
+                \Illuminate\Validation\Rule::exists('storage_locations', 'id')->where('warehouse_id', $warehouseId),
+            ],
             'quantity' => 'required|numeric|min:0.0001',
             'product_batch_id' => 'nullable|exists:product_batches,id',
             'notes' => 'nullable|string|max:500',

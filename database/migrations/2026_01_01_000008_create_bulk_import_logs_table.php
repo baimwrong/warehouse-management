@@ -21,7 +21,7 @@ return new class extends Migration
             $table->unsignedInteger('successful_rows')->default(0);
             $table->unsignedInteger('failed_rows')->default(0);
             $table->string('status', 30)->default('completed'); // completed, partial, failed
-            $table->jsonb('error_log')->nullable(); // PostgreSQL JSONB column for detailed row-by-row error tracing
+            $table->json('error_log')->nullable(); // JSON column for detailed row-by-row error tracing
             $table->timestamps();
 
             $table->index(['import_type', 'created_at']);
