@@ -14,6 +14,24 @@
 <form action="{{ route('outbound.pick-pack.process', $order) }}" method="POST">
     @csrf
 
+    <!-- Barcode Quick Scanner Bar -->
+    <div class="card card-wms mb-4 bg-light border-primary border-opacity-25">
+        <div class="card-body p-3">
+            <div class="row align-items-center g-2">
+                <div class="col-auto">
+                    <i class="bi bi-upc-scan fs-3 text-primary"></i>
+                </div>
+                <div class="col">
+                    <div class="fs-12 fw-bold text-uppercase text-muted">RF / Handheld Barcode Scanner</div>
+                    <input type="text" id="barcode-quick-scanner" class="form-control form-control-sm font-monospace" placeholder="Scan SKU, Barcode, or Bin Location Code to auto-select..." autofocus autocomplete="off">
+                </div>
+                <div class="col-auto">
+                    <span id="scan-feedback" class="badge bg-secondary fs-12 px-2.5 py-1.5">Scanner Ready</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card card-wms mb-4">
         <div class="card-header bg-light d-flex justify-content-between align-items-center">
             <span class="fw-semibold">Pick List Items</span>
@@ -21,7 +39,7 @@
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-wms align-middle mb-0">
+                <table class="table table-wms align-middle mb-0" id="pick-table">
                     <thead>
                         <tr>
                             <th style="width: 280px;">Product SKU</th>
@@ -35,7 +53,7 @@
                         @php
                             $availableStocks = $pickLocations[$item->id] ?? collect();
                         @endphp
-                        <tr>
+                        <tr class="pick-item-row" data-sku="{{ strtoupper($item->product->sku) }}" data-barcode="{{ strtoupper($item->product->barcode ?? '') }}">
                             <td>
                                 <input type="hidden" name="items[{{ $index }}][item_id]" value="{{ $item->id }}">
                                 <div class="fw-bold">{{ $item->product->name }}</div>
@@ -51,10 +69,12 @@
                                        value="{{ $item->quantity_ordered }}" required>
                             </td>
                             <td>
-                                <select name="items[{{ $index }}][source_location_id]" class="form-select form-select-sm font-monospace" required>
+                                <select name="items[{{ $index }}][source_location_id]" class="form-select form-select-sm font-monospace bin-select" required>
                                     <option value="">-- Choose Source Bin with Stock --</option>
                                     @foreach($availableStocks as $stk)
-                                        <option value="{{ $stk->storage_location_id }}:{{ $stk->product_batch_id ?? '' }}" {{ ($item->source_location_id == $stk->storage_location_id && $item->product_batch_id == $stk->product_batch_id) ? 'selected' : '' }}>
+                                        <option value="{{ $stk->storage_location_id }}:{{ $stk->product_batch_id ?? '' }}" 
+                                                data-bin="{{ strtoupper($stk->location->location_code) }}"
+                                                {{ ($item->source_location_id == $stk->storage_location_id && $item->product_batch_id == $stk->product_batch_id) ? 'selected' : '' }}>
                                             {{ $stk->location->location_code }} @if($stk->batch)[Lot: {{ $stk->batch->batch_number }}]@endif (Avail: {{ number_format($stk->available_quantity) }} {{ $item->product->uom }})
                                         </option>
                                     @endforeach
@@ -89,4 +109,64 @@
         </div>
     </div>
 </form>
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const scannerInput = document.getElementById('barcode-quick-scanner');
+    const feedback = document.getElementById('scan-feedback');
+    if (!scannerInput) return;
+
+    scannerInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const query = scannerInput.value.trim().toUpperCase();
+            if (!query) return;
+
+            let matched = false;
+            const rows = document.querySelectorAll('.pick-item-row');
+
+            rows.forEach(row => {
+                const sku = row.dataset.sku;
+                const barcode = row.dataset.barcode;
+                const select = row.querySelector('.bin-select');
+
+                // Check SKU/Barcode match
+                if (query === sku || (barcode && query === barcode)) {
+                    row.classList.add('table-success');
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    feedback.className = 'badge bg-success fs-12 px-2.5 py-1.5';
+                    feedback.textContent = 'Matched SKU: ' + sku;
+                    matched = true;
+                    setTimeout(() => row.classList.remove('table-success'), 3500);
+                }
+
+                // Check Bin location match
+                if (select) {
+                    for (let opt of select.options) {
+                        if (opt.dataset.bin && opt.dataset.bin === query) {
+                            select.value = opt.value;
+                            row.classList.add('table-primary');
+                            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            feedback.className = 'badge bg-primary fs-12 px-2.5 py-1.5';
+                            feedback.textContent = 'Bin Selected: ' + query;
+                            matched = true;
+                            setTimeout(() => row.classList.remove('table-primary'), 3500);
+                            break;
+                        }
+                    }
+                }
+            });
+
+            if (!matched) {
+                feedback.className = 'badge bg-danger fs-12 px-2.5 py-1.5';
+                feedback.textContent = 'Not Found: ' + query;
+            }
+
+            scannerInput.value = '';
+        }
+    });
+});
+</script>
+@endpush
 @endsection

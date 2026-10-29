@@ -34,6 +34,10 @@ class BulkImportService
         $fileName = is_string($file) ? basename($file) : $file->getClientOriginalName();
         $fileSizeKb = is_string($file) ? (int) (filesize($file) / 1024) : (int) ($file->getSize() / 1024);
 
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(300);
+        }
+
         $rows = $this->parseCsv($filePath);
 
         if (empty($rows)) {

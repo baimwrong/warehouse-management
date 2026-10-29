@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Supplier;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SupplierController extends Controller
 {
@@ -14,9 +15,10 @@ class SupplierController extends Controller
         $query = Supplier::query();
 
         if ($search) {
-            $query->where('name', 'ilike', "%{$search}%")
-                  ->orWhere('code', 'ilike', "%{$search}%")
-                  ->orWhere('contact_person', 'ilike', "%{$search}%");
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where('name', $like, "%{$search}%")
+                  ->orWhere('code', $like, "%{$search}%")
+                  ->orWhere('contact_person', $like, "%{$search}%");
         }
 
         $suppliers = $query->orderBy('name')->paginate(15)->withQueryString();

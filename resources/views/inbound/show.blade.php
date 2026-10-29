@@ -14,11 +14,24 @@
             Destination: <strong>{{ $order->warehouse->name ?? 'N/A' }}</strong>
         </div>
     </div>
-    @if(in_array($order->status, ['pending_receipt', 'partially_received']))
-    <a href="{{ route('inbound.receive', $order) }}" class="btn btn-primary">
-        <i class="bi bi-box-arrow-in-down me-1"></i> Receive &amp; Putaway Items
-    </a>
-    @endif
+    <div class="d-flex gap-2">
+        <a href="{{ route('inbound.print-grn', $order) }}" class="btn btn-outline-secondary" target="_blank">
+            <i class="bi bi-printer me-1"></i> Print GRN
+        </a>
+        @if(in_array($order->status, ['pending_receipt', 'partially_received']))
+        <a href="{{ route('inbound.receive', $order) }}" class="btn btn-primary">
+            <i class="bi bi-box-arrow-in-down me-1"></i> Receive &amp; Putaway Items
+        </a>
+        @if(auth()->user()->isManager())
+        <form action="{{ route('inbound.cancel', $order) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to cancel this Purchase Order? Any unreceived lines will be cancelled.')">
+            @csrf
+            <button type="submit" class="btn btn-outline-danger">
+                <i class="bi bi-x-circle me-1"></i> Cancel PO
+            </button>
+        </form>
+        @endif
+        @endif
+    </div>
 </div>
 
 <!-- Details Cards -->

@@ -50,6 +50,12 @@ class StorageLocation extends Model
 
     public function getCurrentVolumeAttribute(): float
     {
+        if ($this->relationLoaded('stocks')) {
+            return (float) $this->stocks->sum(function ($stock) {
+                return $stock->quantity_on_hand * ($stock->product->volume_cbm ?? 0);
+            });
+        }
+
         return (float) $this->stocks()
             ->join('products', 'inventory_stocks.product_id', '=', 'products.id')
             ->selectRaw('SUM(inventory_stocks.quantity_on_hand * products.volume_cbm) as total_volume')
@@ -58,6 +64,12 @@ class StorageLocation extends Model
 
     public function getCurrentWeightAttribute(): float
     {
+        if ($this->relationLoaded('stocks')) {
+            return (float) $this->stocks->sum(function ($stock) {
+                return $stock->quantity_on_hand * ($stock->product->weight_kg ?? 0);
+            });
+        }
+
         return (float) $this->stocks()
             ->join('products', 'inventory_stocks.product_id', '=', 'products.id')
             ->selectRaw('SUM(inventory_stocks.quantity_on_hand * products.weight_kg) as total_weight')

@@ -6,6 +6,7 @@ use App\Models\StorageLocation;
 use App\Models\Warehouse;
 use App\Models\WarehouseZone;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class StorageLocationController extends Controller
 {
@@ -33,11 +34,12 @@ class StorageLocationController extends Controller
             $query->where('is_occupied', false);
         }
         if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('location_code', 'ilike', "%{$search}%")
-                  ->orWhere('aisle', 'ilike', "%{$search}%")
-                  ->orWhere('rack', 'ilike', "%{$search}%")
-                  ->orWhere('bin', 'ilike', "%{$search}%");
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($search, $like) {
+                $q->where('location_code', $like, "%{$search}%")
+                  ->orWhere('aisle', $like, "%{$search}%")
+                  ->orWhere('rack', $like, "%{$search}%")
+                  ->orWhere('bin', $like, "%{$search}%");
             });
         }
 

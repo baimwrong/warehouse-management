@@ -125,9 +125,16 @@ class StockAdjustmentController extends Controller
 
         try {
             DB::transaction(function () use ($adjustment) {
-                foreach ($adjustment->items as $item) {
+                // Pessimistic row lock to prevent race conditions during concurrent approvals
+                $lockedAdjustment = StockAdjustment::where('id', $adjustment->id)->lockForUpdate()->firstOrFail();
+
+                if ($lockedAdjustment->status !== 'pending') {
+                    throw new Exception('Adjustment is already processed.');
+                }
+
+                foreach ($lockedAdjustment->items as $item) {
                     // Lock current inventory row to get live, up-to-the-minute balance
-                    $stock = InventoryStock::where('warehouse_id', $adjustment->warehouse_id)
+                    $stock = InventoryStock::where('warehouse_id', $lockedAdjustment->warehouse_id)
                         ->where('storage_location_id', $item->storage_location_id)
                         ->where('product_id', $item->product_id)
                         ->where('product_batch_id', $item->product_batch_id)
@@ -139,29 +146,29 @@ class StockAdjustmentController extends Controller
 
                     if ($reconciledDiff > 0) {
                         $this->inventoryService->increaseStock(
-                            warehouseId: $adjustment->warehouse_id,
+                            warehouseId: $lockedAdjustment->warehouse_id,
                             locationId: $item->storage_location_id,
                             productId: $item->product_id,
                             quantity: $reconciledDiff,
                             batchId: $item->product_batch_id,
                             referenceType: 'adjustment',
-                            referenceId: $adjustment->id,
+                            referenceId: $lockedAdjustment->id,
                             unitCost: (float) ($item->product->unit_cost ?? 0),
                             userId: auth()->id(),
-                            notes: "Adjustment {$adjustment->adjustment_number} (+{$reconciledDiff})"
+                            notes: "Adjustment {$lockedAdjustment->adjustment_number} (+{$reconciledDiff})"
                         );
                     } elseif ($reconciledDiff < 0) {
                         $this->inventoryService->decreaseStock(
-                            warehouseId: $adjustment->warehouse_id,
+                            warehouseId: $lockedAdjustment->warehouse_id,
                             locationId: $item->storage_location_id,
                             productId: $item->product_id,
                             quantity: abs($reconciledDiff),
                             batchId: $item->product_batch_id,
                             referenceType: 'adjustment',
-                            referenceId: $adjustment->id,
+                            referenceId: $lockedAdjustment->id,
                             unitCost: (float) ($item->product->unit_cost ?? 0),
                             userId: auth()->id(),
-                            notes: "Adjustment {$adjustment->adjustment_number} ({$reconciledDiff})"
+                            notes: "Adjustment {$lockedAdjustment->adjustment_number} ({$reconciledDiff})"
                         );
                     }
 
@@ -172,7 +179,7 @@ class StockAdjustmentController extends Controller
                     ]);
                 }
 
-                $adjustment->update([
+                $lockedAdjustment->update([
                     'status' => 'approved',
                     'approved_by' => auth()->id(),
                     'approved_at' => Carbon::now(),
@@ -192,17 +199,25 @@ class StockAdjustmentController extends Controller
             abort(403, 'Unauthorized. Only warehouse managers and admins can reject stock adjustments.');
         }
 
-        if ($adjustment->status !== 'pending') {
-            return back()->withErrors(['error' => 'Adjustment is already processed.']);
+        try {
+            DB::transaction(function () use ($adjustment) {
+                $lockedAdjustment = StockAdjustment::where('id', $adjustment->id)->lockForUpdate()->firstOrFail();
+
+                if ($lockedAdjustment->status !== 'pending') {
+                    throw new Exception('Adjustment is already processed.');
+                }
+
+                $lockedAdjustment->update([
+                    'status' => 'rejected',
+                    'approved_by' => auth()->id(),
+                    'approved_at' => Carbon::now(),
+                ]);
+            });
+
+            return redirect()->route('adjustments.show', $adjustment)
+                ->with('info', "Stock Adjustment '{$adjustment->adjustment_number}' has been rejected.");
+        } catch (Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
         }
-
-        $adjustment->update([
-            'status' => 'rejected',
-            'approved_by' => auth()->id(),
-            'approved_at' => Carbon::now(),
-        ]);
-
-        return redirect()->route('adjustments.show', $adjustment)
-            ->with('info', "Stock Adjustment '{$adjustment->adjustment_number}' has been rejected.");
     }
 }

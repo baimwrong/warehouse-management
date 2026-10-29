@@ -109,6 +109,14 @@ class OutboundOrderController extends Controller
         return view('outbound.show', compact('order'));
     }
 
+    public function printPackingSlip(OutboundOrder $order, \App\Services\BarcodeService $barcodeService)
+    {
+        $order->load(['customer', 'warehouse', 'creator', 'items.product', 'items.sourceLocation.zone', 'items.batch']);
+        $barcodeSvg = $barcodeService->generateSvg($order->order_number, 220, 50);
+
+        return view('outbound.print-slip', compact('order', 'barcodeSvg'));
+    }
+
     public function pickPackForm(OutboundOrder $order)
     {
         if (in_array($order->status, ['shipped', 'delivered', 'cancelled'])) {
@@ -117,12 +125,15 @@ class OutboundOrderController extends Controller
 
         $order->load(['customer', 'warehouse', 'items.product']);
 
-        // Efficiently retrieve all candidate stock rows in a single indexed query
+        // Efficiently retrieve all candidate stock rows sorted by FEFO (First-Expired, First-Out) and FIFO
         $productIds = $order->items->pluck('product_id')->unique();
         $allStocks = InventoryStock::with(['location.zone', 'batch'])
-            ->where('warehouse_id', $order->warehouse_id)
-            ->whereIn('product_id', $productIds)
-            ->where('quantity_on_hand', '>', 0)
+            ->leftJoin('product_batches', 'inventory_stocks.product_batch_id', '=', 'product_batches.id')
+            ->where('inventory_stocks.warehouse_id', $order->warehouse_id)
+            ->whereIn('inventory_stocks.product_id', $productIds)
+            ->where('inventory_stocks.quantity_on_hand', '>', 0)
+            ->select('inventory_stocks.*')
+            ->orderByRaw('CASE WHEN product_batches.expiry_date IS NULL THEN 1 ELSE 0 END, product_batches.expiry_date ASC, inventory_stocks.created_at ASC')
             ->get()
             ->groupBy('product_id');
 
@@ -152,11 +163,18 @@ class OutboundOrderController extends Controller
         ]);
 
         try {
-            DB::transaction(function () use ($validated, $order) {
-                $isShipping = $validated['action'] === 'ship';
+            $isShipping = $validated['action'] === 'ship';
+
+            DB::transaction(function () use ($validated, $order, $isShipping) {
+                // Pessimistic row lock to prevent race conditions on double submit or concurrent fulfillment
+                $lockedOrder = OutboundOrder::where('id', $order->id)->lockForUpdate()->firstOrFail();
+
+                if (in_array($lockedOrder->status, ['shipped', 'delivered', 'cancelled'])) {
+                    throw new Exception('Order is already marked as shipped, delivered, or cancelled. Stock cannot be deducted again.');
+                }
 
                 foreach ($validated['items'] as $itemData) {
-                    $orderItem = $order->items()->findOrFail($itemData['item_id']);
+                    $orderItem = $lockedOrder->items()->where('id', $itemData['item_id'])->lockForUpdate()->firstOrFail();
                     $qty = (float) $itemData['picked_qty'];
 
                     // Parse location and batch ID (supporting both integer ID and compound "location_id:batch_id")
@@ -175,45 +193,54 @@ class OutboundOrderController extends Controller
 
                     // Verify storage location belongs to this facility
                     $validLocation = StorageLocation::where('id', $locationId)
-                        ->where('warehouse_id', $order->warehouse_id)
+                        ->where('warehouse_id', $lockedOrder->warehouse_id)
                         ->exists();
 
                     if (!$validLocation) {
-                        throw new Exception("Selected storage bin #{$locationId} does not belong to facility '{$order->warehouse->name}'.");
+                        throw new Exception("Selected storage bin #{$locationId} does not belong to facility '{$lockedOrder->warehouse->name}'.");
                     }
 
                     $orderItem->source_location_id = $locationId;
                     $orderItem->product_batch_id = $batchId;
                     $orderItem->quantity_picked = $qty;
                     $orderItem->quantity_packed = $qty;
-                    $orderItem->status = $isShipping ? 'shipped' : 'packed';
+                    $orderItem->status = $isShipping ? ($qty >= $orderItem->quantity_ordered ? 'shipped' : 'packed') : 'packed';
                     $orderItem->save();
 
                     if ($isShipping && $qty > 0) {
                         // Deduct physical inventory stock with accurate batch tracking
                         $this->inventoryService->decreaseStock(
-                            warehouseId: $order->warehouse_id,
+                            warehouseId: $lockedOrder->warehouse_id,
                             locationId: $locationId,
                             productId: $orderItem->product_id,
                             quantity: $qty,
                             batchId: $batchId,
                             referenceType: 'outbound',
-                            referenceId: $order->id,
+                            referenceId: $lockedOrder->id,
                             unitCost: (float) $orderItem->product->unit_cost,
                             userId: auth()->id(),
-                            notes: "Dispatched against Order {$order->order_number}"
+                            notes: "Dispatched against Order {$lockedOrder->order_number}"
                         );
                     }
                 }
 
                 if ($isShipping) {
-                    $order->status = 'shipped';
-                    $order->shipped_date = Carbon::now();
-                    $order->tracking_number = $validated['tracking_number'] ?? $order->tracking_number;
+                    // Check if all line items in order are completely fulfilled
+                    $allFulfilled = true;
+                    foreach ($lockedOrder->items as $checkItem) {
+                        if ($checkItem->quantity_picked < $checkItem->quantity_ordered) {
+                            $allFulfilled = false;
+                            break;
+                        }
+                    }
+
+                    $lockedOrder->status = $allFulfilled ? 'shipped' : 'partially_shipped';
+                    $lockedOrder->shipped_date = Carbon::now();
+                    $lockedOrder->tracking_number = $validated['tracking_number'] ?? $lockedOrder->tracking_number;
                 } else {
-                    $order->status = 'packed';
+                    $lockedOrder->status = 'packed';
                 }
-                $order->save();
+                $lockedOrder->save();
             });
 
             $msg = $validated['action'] === 'ship'
@@ -223,6 +250,49 @@ class OutboundOrderController extends Controller
             return redirect()->route('outbound.show', $order)->with('success', $msg);
         } catch (Exception $e) {
             return back()->withInput()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function cancel(Request $request, OutboundOrder $order)
+    {
+        try {
+            DB::transaction(function () use ($order) {
+                $lockedOrder = OutboundOrder::where('id', $order->id)->lockForUpdate()->firstOrFail();
+
+                if (in_array($lockedOrder->status, ['shipped', 'delivered'])) {
+                    throw new Exception('Cannot cancel an order that has already been shipped or delivered.');
+                }
+                if ($lockedOrder->status === 'cancelled') {
+                    throw new Exception('This outbound order is already cancelled.');
+                }
+
+                // Release allocations on line items if packed/picked
+                foreach ($lockedOrder->items as $item) {
+                    if ($item->source_location_id && $item->quantity_packed > 0) {
+                        try {
+                            $this->inventoryService->releaseStock(
+                                warehouseId: $lockedOrder->warehouse_id,
+                                locationId: $item->source_location_id,
+                                productId: $item->product_id,
+                                quantity: (float) $item->quantity_packed,
+                                batchId: $item->product_batch_id
+                            );
+                        } catch (Exception $e) {
+                            // Non-fatal if reservation not tracked
+                        }
+                    }
+                    $item->status = 'cancelled';
+                    $item->save();
+                }
+
+                $lockedOrder->status = 'cancelled';
+                $lockedOrder->save();
+            });
+
+            return redirect()->route('outbound.show', $order)
+                ->with('info', "Outbound Order '{$order->order_number}' has been cancelled.");
+        } catch (Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
         }
     }
 }

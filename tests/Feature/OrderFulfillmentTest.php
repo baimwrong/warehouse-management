@@ -280,4 +280,113 @@ class OrderFulfillmentTest extends TestCase
         $stock = InventoryStock::where('storage_location_id', $this->location->id)->first();
         $this->assertEquals(10.0, (float) $stock->quantity_on_hand);
     }
+
+    public function test_packing_slip_and_grn_render_successfully(): void
+    {
+        $inbound = InboundOrder::create([
+            'order_number' => 'PO-TEST-PRINT',
+            'supplier_id' => $this->supplier->id,
+            'warehouse_id' => $this->warehouse->id,
+            'status' => 'received',
+            'total_amount' => 500.0,
+            'created_by' => $this->operator->id,
+        ]);
+        $inbound->items()->create([
+            'product_id' => $this->product->id,
+            'quantity_expected' => 10,
+            'quantity_received' => 10,
+            'unit_cost' => 50.0,
+            'status' => 'received',
+        ]);
+
+        $outbound = OutboundOrder::create([
+            'order_number' => 'SO-TEST-PRINT',
+            'customer_id' => $this->customer->id,
+            'warehouse_id' => $this->warehouse->id,
+            'status' => 'confirmed',
+            'total_amount' => 400.0,
+            'created_by' => $this->dispatcher->id,
+        ]);
+        $outbound->items()->create([
+            'product_id' => $this->product->id,
+            'quantity_ordered' => 5,
+            'unit_price' => 80.0,
+            'status' => 'pending',
+        ]);
+
+        $grnResponse = $this->actingAs($this->operator)->get("/inbound/{$inbound->id}/print-grn");
+        $grnResponse->assertStatus(200);
+        $grnResponse->assertSee('Goods Receipt Note (GRN)');
+        $grnResponse->assertSee('PO-TEST-PRINT');
+
+        $slipResponse = $this->actingAs($this->dispatcher)->get("/outbound/{$outbound->id}/print-pack-slip");
+        $slipResponse->assertStatus(200);
+        $slipResponse->assertSee('Packing Slip &amp; BOL', false);
+        $slipResponse->assertSee('SO-TEST-PRINT');
+    }
+
+    public function test_outbound_pick_pack_orders_by_fefo_expiry(): void
+    {
+        $batchExpiringSoon = ProductBatch::create([
+            'product_id' => $this->product->id,
+            'batch_number' => 'BATCH-EXP-SOON',
+            'expiry_date' => Carbon::now()->addDays(10)->format('Y-m-d'),
+        ]);
+
+        $batchExpiringLater = ProductBatch::create([
+            'product_id' => $this->product->id,
+            'batch_number' => 'BATCH-EXP-LATER',
+            'expiry_date' => Carbon::now()->addDays(100)->format('Y-m-d'),
+        ]);
+
+        $locB = StorageLocation::create([
+            'warehouse_id' => $this->warehouse->id,
+            'warehouse_zone_id' => $this->zone->id,
+            'location_code' => 'LOC-01-B1',
+            'is_active' => true,
+        ]);
+
+        // Stock BATCH-EXP-LATER first
+        app(InventoryService::class)->increaseStock(
+            warehouseId: $this->warehouse->id,
+            locationId: $this->location->id,
+            productId: $this->product->id,
+            quantity: 10.0,
+            batchId: $batchExpiringLater->id
+        );
+
+        // Stock BATCH-EXP-SOON second
+        app(InventoryService::class)->increaseStock(
+            warehouseId: $this->warehouse->id,
+            locationId: $locB->id,
+            productId: $this->product->id,
+            quantity: 10.0,
+            batchId: $batchExpiringSoon->id
+        );
+
+        $order = OutboundOrder::create([
+            'order_number' => 'SO-TEST-FEFO',
+            'customer_id' => $this->customer->id,
+            'warehouse_id' => $this->warehouse->id,
+            'status' => 'confirmed',
+            'total_amount' => 160.0,
+            'created_by' => $this->dispatcher->id,
+        ]);
+
+        $item = $order->items()->create([
+            'product_id' => $this->product->id,
+            'quantity_ordered' => 2,
+            'unit_price' => 80.0,
+            'status' => 'pending',
+        ]);
+
+        $response = $this->actingAs($this->dispatcher)->get("/outbound/{$order->id}/pick-pack");
+        $response->assertStatus(200);
+
+        // First candidate stock should be the soonest expiring batch (FEFO)
+        $pickLocations = $response->viewData('pickLocations');
+        $this->assertNotEmpty($pickLocations[$item->id]);
+        $firstStock = $pickLocations[$item->id]->first();
+        $this->assertEquals($batchExpiringSoon->id, $firstStock->product_batch_id);
+    }
 }

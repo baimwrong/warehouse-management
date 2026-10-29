@@ -100,6 +100,14 @@ class InboundOrderController extends Controller
         return view('inbound.show', compact('order'));
     }
 
+    public function printGrn(InboundOrder $order, \App\Services\BarcodeService $barcodeService)
+    {
+        $order->load(['supplier', 'warehouse', 'creator', 'items.product', 'items.targetLocation.zone']);
+        $barcodeSvg = $barcodeService->generateSvg($order->order_number, 220, 50);
+
+        return view('inbound.print-grn', compact('order', 'barcodeSvg'));
+    }
+
     public function receiveForm(InboundOrder $order)
     {
         if ($order->status === 'received' || $order->status === 'cancelled') {
@@ -141,64 +149,107 @@ class InboundOrderController extends Controller
                 \Illuminate\Validation\Rule::exists('storage_locations', 'id')->where('warehouse_id', $order->warehouse_id),
             ],
             'items.*.batch_number' => 'nullable|string|max:80',
-            'items.*.expiry_date' => 'nullable|date',
+            'items.*.expiry_date' => 'nullable|date|after_or_equal:today',
         ]);
 
-        DB::transaction(function () use ($validated, $order) {
-            $allReceived = true;
+        try {
+            DB::transaction(function () use ($validated, $order) {
+                // Pessimistic row locking inside transaction to prevent concurrent duplicate receipts
+                $lockedOrder = InboundOrder::where('id', $order->id)->lockForUpdate()->firstOrFail();
 
-            foreach ($validated['items'] as $itemData) {
-                $orderItem = $order->items()->findOrFail($itemData['item_id']);
-                $qty = (float) $itemData['received_qty'];
+                if ($lockedOrder->status === 'received' || $lockedOrder->status === 'cancelled') {
+                    throw new Exception('This purchase order is already completed or cancelled.');
+                }
 
-                if ($qty > 0) {
-                    $batchId = null;
-                    if (!empty($itemData['batch_number'])) {
-                        $batch = $orderItem->product->batches()->firstOrCreate(
-                            [
-                                'batch_number' => trim($itemData['batch_number']),
-                            ],
-                            [
-                                'expiry_date' => $itemData['expiry_date'] ?? null,
-                                'supplier_id' => $order->supplier_id,
-                            ]
+                $allReceived = true;
+
+                foreach ($validated['items'] as $itemData) {
+                    $orderItem = $lockedOrder->items()->where('id', $itemData['item_id'])->lockForUpdate()->firstOrFail();
+                    $qty = (float) $itemData['received_qty'];
+
+                    if ($qty > 0) {
+                        $batchId = null;
+                        if (!empty($itemData['batch_number'])) {
+                            $batch = $orderItem->product->batches()->firstOrCreate(
+                                [
+                                    'batch_number' => trim($itemData['batch_number']),
+                                ],
+                                [
+                                    'expiry_date' => $itemData['expiry_date'] ?? null,
+                                    'supplier_id' => $lockedOrder->supplier_id,
+                                ]
+                            );
+                            $batchId = $batch->id;
+                        }
+
+                        $orderItem->quantity_received += $qty;
+                        $orderItem->target_location_id = $itemData['target_location_id'];
+                        $orderItem->batch_number = $itemData['batch_number'] ?? null;
+                        $orderItem->expiry_date = $itemData['expiry_date'] ?? null;
+                        $orderItem->status = $orderItem->quantity_received >= $orderItem->quantity_expected ? 'received' : 'partial';
+                        $orderItem->save();
+
+                        // Increase warehouse stock in chosen bin
+                        $this->inventoryService->increaseStock(
+                            warehouseId: $lockedOrder->warehouse_id,
+                            locationId: $itemData['target_location_id'],
+                            productId: $orderItem->product_id,
+                            quantity: $qty,
+                            batchId: $batchId,
+                            referenceType: 'inbound',
+                            referenceId: $lockedOrder->id,
+                            unitCost: (float) $orderItem->unit_cost,
+                            userId: auth()->id(),
+                            notes: "Received against PO {$lockedOrder->order_number}"
                         );
-                        $batchId = $batch->id;
                     }
 
-                    $orderItem->quantity_received += $qty;
-                    $orderItem->target_location_id = $itemData['target_location_id'];
-                    $orderItem->batch_number = $itemData['batch_number'] ?? null;
-                    $orderItem->expiry_date = $itemData['expiry_date'] ?? null;
-                    $orderItem->status = $orderItem->quantity_received >= $orderItem->quantity_expected ? 'received' : 'partial';
-                    $orderItem->save();
-
-                    // Increase warehouse stock in chosen bin
-                    $this->inventoryService->increaseStock(
-                        warehouseId: $order->warehouse_id,
-                        locationId: $itemData['target_location_id'],
-                        productId: $orderItem->product_id,
-                        quantity: $qty,
-                        batchId: $batchId,
-                        referenceType: 'inbound',
-                        referenceId: $order->id,
-                        unitCost: (float) $orderItem->unit_cost,
-                        userId: auth()->id(),
-                        notes: "Received against PO {$order->order_number}"
-                    );
+                    if ($orderItem->quantity_received < $orderItem->quantity_expected) {
+                        $allReceived = false;
+                    }
                 }
 
-                if ($orderItem->quantity_received < $orderItem->quantity_expected) {
-                    $allReceived = false;
+                $lockedOrder->status = $allReceived ? 'received' : 'partially_received';
+                $lockedOrder->received_date = Carbon::now();
+                $lockedOrder->save();
+            });
+
+            return redirect()->route('inbound.show', $order)
+                ->with('success', "Goods received and successfully put away into inventory.");
+        } catch (Exception $e) {
+            return redirect()->route('inbound.show', $order)
+                ->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function cancel(Request $request, InboundOrder $order)
+    {
+        try {
+            DB::transaction(function () use ($order) {
+                $lockedOrder = InboundOrder::where('id', $order->id)->lockForUpdate()->firstOrFail();
+
+                if ($lockedOrder->status === 'received') {
+                    throw new Exception('Cannot cancel an order that has already been fully received.');
                 }
-            }
+                if ($lockedOrder->status === 'cancelled') {
+                    throw new Exception('This purchase order is already cancelled.');
+                }
 
-            $order->status = $allReceived ? 'received' : 'partially_received';
-            $order->received_date = Carbon::now();
-            $order->save();
-        });
+                $lockedOrder->status = 'cancelled';
+                $lockedOrder->save();
 
-        return redirect()->route('inbound.show', $order)
-            ->with('success', "Goods received and successfully put away into inventory.");
+                foreach ($lockedOrder->items as $item) {
+                    if ($item->status !== 'received') {
+                        $item->status = 'cancelled';
+                        $item->save();
+                    }
+                }
+            });
+
+            return redirect()->route('inbound.show', $order)
+                ->with('info', "Inbound PO '{$order->order_number}' has been cancelled.");
+        } catch (Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
     }
 }

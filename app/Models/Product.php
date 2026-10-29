@@ -71,11 +71,17 @@ class Product extends Model
 
     public function getTotalQuantityOnHandAttribute(): float
     {
+        if ($this->relationLoaded('stocks')) {
+            return (float) $this->stocks->sum('quantity_on_hand');
+        }
         return (float) $this->stocks()->sum('quantity_on_hand');
     }
 
     public function getTotalQuantityReservedAttribute(): float
     {
+        if ($this->relationLoaded('stocks')) {
+            return (float) $this->stocks->sum('quantity_reserved');
+        }
         return (float) $this->stocks()->sum('quantity_reserved');
     }
 

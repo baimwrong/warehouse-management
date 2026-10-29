@@ -28,6 +28,20 @@ class StockMovement extends Model
         'unit_cost' => 'decimal:4',
     ];
 
+    /**
+     * Enforce audit ledger immutability: movements cannot be altered or purged
+     */
+    protected static function booted()
+    {
+        static::updating(function () {
+            throw new \RuntimeException('StockMovement records are immutable and cannot be modified.');
+        });
+
+        static::deleting(function () {
+            throw new \RuntimeException('StockMovement records are immutable and cannot be deleted.');
+        });
+    }
+
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);

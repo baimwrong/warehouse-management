@@ -83,6 +83,9 @@
             </a>
 
             @if(auth()->check() && auth()->user()->isAdmin())
+            <a href="{{ route('admin.users.index') }}" class="wms-nav-link {{ request()->routeIs('admin.users.*') ? 'active' : '' }}">
+                <i class="bi bi-people"></i> Staff &amp; Users
+            </a>
             <a href="{{ route('admin.import.index') }}" class="wms-nav-link {{ request()->routeIs('admin.import.*') ? 'active' : '' }} text-warning">
                 <i class="bi bi-file-earmark-arrow-up"></i> Admin Bulk Import
             </a>

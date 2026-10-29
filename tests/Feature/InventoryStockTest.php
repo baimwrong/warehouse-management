@@ -244,4 +244,103 @@ class InventoryStockTest extends TestCase
 
         $response->assertSessionHasErrors(['to_location_id']);
     }
+
+    public function test_unique_constraint_prevents_duplicate_unbatched_records(): void
+    {
+        InventoryStock::create([
+            'warehouse_id' => $this->warehouse->id,
+            'storage_location_id' => $this->locA->id,
+            'product_id' => $this->product->id,
+            'product_batch_id' => null,
+            'quantity_on_hand' => 10,
+        ]);
+
+        $this->expectException(QueryException::class);
+
+        // Attempting to insert another record with NULL batch for same bin/product must fail
+        InventoryStock::create([
+            'warehouse_id' => $this->warehouse->id,
+            'storage_location_id' => $this->locA->id,
+            'product_id' => $this->product->id,
+            'product_batch_id' => null,
+            'quantity_on_hand' => 20,
+        ]);
+    }
+
+    public function test_stock_reservation_and_release_lifecycle(): void
+    {
+        $this->inventoryService->increaseStock(
+            warehouseId: $this->warehouse->id,
+            locationId: $this->locA->id,
+            productId: $this->product->id,
+            quantity: 20.0
+        );
+
+        // Reserve 8 units
+        $this->inventoryService->reserveStock(
+            warehouseId: $this->warehouse->id,
+            locationId: $this->locA->id,
+            productId: $this->product->id,
+            quantity: 8.0
+        );
+
+        $stock = InventoryStock::where('storage_location_id', $this->locA->id)->first();
+        $this->assertEquals(20.0, (float) $stock->quantity_on_hand);
+        $this->assertEquals(8.0, (float) $stock->quantity_reserved);
+        $this->assertEquals(12.0, (float) $stock->available_quantity);
+
+        // Attempting to reserve more than available (15 > 12) must fail
+        try {
+            $this->inventoryService->reserveStock(
+                warehouseId: $this->warehouse->id,
+                locationId: $this->locA->id,
+                productId: $this->product->id,
+                quantity: 15.0
+            );
+            $this->fail('Expected InvalidArgumentException for over-reservation was not thrown');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('Insufficient available stock to reserve', $e->getMessage());
+        }
+
+        // Release 3 units
+        $this->inventoryService->releaseStock(
+            warehouseId: $this->warehouse->id,
+            locationId: $this->locA->id,
+            productId: $this->product->id,
+            quantity: 3.0
+        );
+
+        $stock->refresh();
+        $this->assertEquals(5.0, (float) $stock->quantity_reserved);
+        $this->assertEquals(15.0, (float) $stock->available_quantity);
+    }
+
+    public function test_stock_movement_ledger_is_immutable(): void
+    {
+        $this->inventoryService->increaseStock(
+            warehouseId: $this->warehouse->id,
+            locationId: $this->locA->id,
+            productId: $this->product->id,
+            quantity: 10.0
+        );
+
+        $movement = \App\Models\StockMovement::first();
+        $this->assertNotNull($movement);
+
+        // Updating movement must throw RuntimeException
+        try {
+            $movement->update(['notes' => 'Tampered movement']);
+            $this->fail('Expected RuntimeException for update on StockMovement was not thrown');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('immutable', $e->getMessage());
+        }
+
+        // Deleting movement must throw RuntimeException
+        try {
+            $movement->delete();
+            $this->fail('Expected RuntimeException for delete on StockMovement was not thrown');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('immutable', $e->getMessage());
+        }
+    }
 }

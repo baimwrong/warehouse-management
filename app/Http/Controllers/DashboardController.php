@@ -53,14 +53,15 @@ class DashboardController extends Controller
         $pendingInbound = $inboundQuery->count();
         $pendingOutbound = $outboundQuery->count();
 
-        // Low stock products via database aggregation
+        // Low stock products via database aggregation (using join-condition to preserve zero-stock items)
         $lowStockQuery = Product::where('is_active', true)
             ->with(['category'])
-            ->leftJoin('inventory_stocks', 'products.id', '=', 'inventory_stocks.product_id');
-
-        if ($warehouseId) {
-            $lowStockQuery->where('inventory_stocks.warehouse_id', $warehouseId);
-        }
+            ->leftJoin('inventory_stocks', function ($join) use ($warehouseId) {
+                $join->on('products.id', '=', 'inventory_stocks.product_id');
+                if ($warehouseId) {
+                    $join->where('inventory_stocks.warehouse_id', '=', $warehouseId);
+                }
+            });
 
         $lowStockProducts = $lowStockQuery
             ->select('products.*')

@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\Product;
 use App\Services\BarcodeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
@@ -24,10 +25,11 @@ class ProductController extends Controller
         $query = Product::with(['category', 'stocks.warehouse', 'stocks.location']);
 
         if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'ilike', "%{$search}%")
-                  ->orWhere('sku', 'ilike', "%{$search}%")
-                  ->orWhere('barcode', 'ilike', "%{$search}%");
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($search, $like) {
+                $q->where('name', $like, "%{$search}%")
+                  ->orWhere('sku', $like, "%{$search}%")
+                  ->orWhere('barcode', $like, "%{$search}%");
             });
         }
 

@@ -8,6 +8,7 @@ use App\Models\ProductBatch;
 use App\Models\Warehouse;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class InventoryController extends Controller
 {
@@ -26,12 +27,13 @@ class InventoryController extends Controller
         }
 
         if ($search) {
-            $query->where(function ($sub) use ($search) {
-                $sub->whereHas('product', function ($q) use ($search) {
-                    $q->where('name', 'ilike', "%{$search}%")
-                      ->orWhere('sku', 'ilike', "%{$search}%");
-                })->orWhereHas('location', function ($q) use ($search) {
-                    $q->where('location_code', 'ilike', "%{$search}%");
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($sub) use ($search, $like) {
+                $sub->whereHas('product', function ($q) use ($search, $like) {
+                    $q->where('name', $like, "%{$search}%")
+                      ->orWhere('sku', $like, "%{$search}%");
+                })->orWhereHas('location', function ($q) use ($search, $like) {
+                    $q->where('location_code', $like, "%{$search}%");
                 });
             });
         }
@@ -60,10 +62,14 @@ class InventoryController extends Controller
     {
         $days = (int) $request->query('days', 90);
 
-        $batches = ProductBatch::with(['product.category', 'supplier', 'stocks.warehouse', 'stocks.location'])
-            ->whereNotNull('expiry_date')
-            ->orderBy('expiry_date')
-            ->paginate(20);
+        $query = ProductBatch::with(['product.category', 'supplier', 'stocks.warehouse', 'stocks.location'])
+            ->whereNotNull('expiry_date');
+
+        if ($days > 0) {
+            $query->where('expiry_date', '<=', Carbon::now()->addDays($days));
+        }
+
+        $batches = $query->orderBy('expiry_date')->paginate(20)->withQueryString();
 
         return view('inventory.batches', compact('batches', 'days'));
     }

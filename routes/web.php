@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\BulkImportController;
+use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
@@ -89,6 +90,10 @@ Route::middleware('auth')->group(function () {
         Route::get('/inbound/{order}/receive', [InboundOrderController::class, 'receiveForm'])->name('inbound.receive');
         Route::post('/inbound/{order}/receive', [InboundOrderController::class, 'processReceipt'])->name('inbound.receive.process');
     });
+    Route::middleware('role:admin,manager')->group(function () {
+        Route::post('/inbound/{order}/cancel', [InboundOrderController::class, 'cancel'])->name('inbound.cancel');
+    });
+    Route::get('/inbound/{order}/print-grn', [InboundOrderController::class, 'printGrn'])->name('inbound.print-grn');
     Route::get('/inbound/{order}', [InboundOrderController::class, 'show'])->name('inbound.show');
 
     // Outbound Dispatch / Sales Orders (View: all staff; Actions: manager, dispatcher, admin)
@@ -98,7 +103,9 @@ Route::middleware('auth')->group(function () {
         Route::post('/outbound', [OutboundOrderController::class, 'store'])->name('outbound.store');
         Route::get('/outbound/{order}/pick-pack', [OutboundOrderController::class, 'pickPackForm'])->name('outbound.pick-pack');
         Route::post('/outbound/{order}/pick-pack', [OutboundOrderController::class, 'processPickPack'])->name('outbound.pick-pack.process');
+        Route::post('/outbound/{order}/cancel', [OutboundOrderController::class, 'cancel'])->name('outbound.cancel');
     });
+    Route::get('/outbound/{order}/print-pack-slip', [OutboundOrderController::class, 'printPackingSlip'])->name('outbound.print-slip');
     Route::get('/outbound/{order}', [OutboundOrderController::class, 'show'])->name('outbound.show');
 
     // Suppliers & Customers (View: all staff; Create/Edit: manager, admin)
@@ -123,8 +130,17 @@ Route::middleware('auth')->group(function () {
         Route::get('/reports/utilization', [ReportController::class, 'utilization'])->name('reports.utilization');
     });
 
-    // Admin Only: Bulk Data Import Center
+    // Admin Only: Administration & Bulk Data Import Center
     Route::middleware('role:admin')->prefix('admin')->name('admin.')->group(function () {
+        // Staff & User Management
+        Route::get('/users', [UserController::class, 'index'])->name('users.index');
+        Route::get('/users/create', [UserController::class, 'create'])->name('users.create');
+        Route::post('/users', [UserController::class, 'store'])->name('users.store');
+        Route::get('/users/{user}/edit', [UserController::class, 'edit'])->name('users.edit');
+        Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
+        Route::patch('/users/{user}/toggle', [UserController::class, 'toggleStatus'])->name('users.toggle');
+
+        // Bulk Data Import Center
         Route::get('/import', [BulkImportController::class, 'index'])->name('import.index');
         Route::post('/import', [BulkImportController::class, 'process'])->name('import.process');
         Route::get('/import/template/{type}', [BulkImportController::class, 'downloadTemplate'])->name('import.template');

@@ -27,6 +27,11 @@ return new class extends Migration
             $table->index(['warehouse_id', 'quantity_on_hand']);
         });
 
+        // Ensure non-batched stock (where product_batch_id is NULL) is also strictly unique per bin/product
+        if (in_array(DB::connection()->getDriverName(), ['pgsql', 'sqlite'])) {
+            DB::statement('CREATE UNIQUE INDEX inv_stocks_null_batch_unique ON inventory_stocks (warehouse_id, storage_location_id, product_id) WHERE product_batch_id IS NULL');
+        }
+
         Schema::create('stock_movements', function (Blueprint $table) {
             $table->id();
             $table->string('reference_type', 40); // inbound, outbound, transfer, adjustment, initial, cycle_count

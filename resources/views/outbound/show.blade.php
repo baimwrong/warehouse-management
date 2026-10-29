@@ -14,11 +14,22 @@
             Facility: <strong>{{ $order->warehouse->name ?? 'N/A' }}</strong>
         </div>
     </div>
-    @if(!in_array($order->status, ['shipped', 'delivered', 'cancelled']))
-    <a href="{{ route('outbound.pick-pack', $order) }}" class="btn btn-primary">
-        <i class="bi bi-box me-1"></i> Pick, Pack &amp; Dispatch Order
-    </a>
-    @endif
+    <div class="d-flex gap-2">
+        <a href="{{ route('outbound.print-slip', $order) }}" class="btn btn-outline-secondary" target="_blank">
+            <i class="bi bi-printer me-1"></i> Print Packing Slip &amp; BOL
+        </a>
+        @if(!in_array($order->status, ['shipped', 'delivered', 'cancelled']))
+        <a href="{{ route('outbound.pick-pack', $order) }}" class="btn btn-primary">
+            <i class="bi bi-box me-1"></i> Pick, Pack &amp; Dispatch Order
+        </a>
+        <form action="{{ route('outbound.cancel', $order) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to cancel this sales order? Any picked/reserved items will be released back to inventory.')">
+            @csrf
+            <button type="submit" class="btn btn-outline-danger">
+                <i class="bi bi-x-circle me-1"></i> Cancel Order
+            </button>
+        </form>
+        @endif
+    </div>
 </div>
 
 <div class="row g-3 mb-4">

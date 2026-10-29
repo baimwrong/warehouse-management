@@ -131,6 +131,10 @@ class InventoryService
             }
 
             $stock->quantity_on_hand -= $quantity;
+            if ($stock->quantity_reserved > 0) {
+                // Relieve reserved allocation concurrently when stock is shipped
+                $stock->quantity_reserved = max(0.0, $stock->quantity_reserved - min($stock->quantity_reserved, $quantity));
+            }
             $stock->save();
 
             // Check if location is now empty
@@ -258,6 +262,65 @@ class InventoryService
                 'user_id' => $userId,
                 'notes' => $notes ?? "Internal transfer from bin #{$fromLocationId} to #{$toLocationId}",
             ]);
+        });
+    }
+
+    /**
+     * Soft-reserve inventory in a specific bin for an outbound order or allocation
+     */
+    public function reserveStock(
+        int $warehouseId,
+        int $locationId,
+        int $productId,
+        float $quantity,
+        ?int $batchId = null
+    ): InventoryStock {
+        return DB::transaction(function () use ($warehouseId, $locationId, $productId, $quantity, $batchId) {
+            $stock = InventoryStock::where('warehouse_id', $warehouseId)
+                ->where('storage_location_id', $locationId)
+                ->where('product_id', $productId)
+                ->where('product_batch_id', $batchId)
+                ->lockForUpdate()
+                ->first();
+
+            $available = $stock ? (float) ($stock->quantity_on_hand - $stock->quantity_reserved) : 0.0;
+            if (!$stock || $available < $quantity) {
+                throw new InvalidArgumentException("Insufficient available stock to reserve. Requested: {$quantity}, Available: {$available}");
+            }
+
+            $stock->quantity_reserved += $quantity;
+            $stock->save();
+
+            return $stock;
+        });
+    }
+
+    /**
+     * Release previously reserved stock (e.g. order cancelled or modified)
+     */
+    public function releaseStock(
+        int $warehouseId,
+        int $locationId,
+        int $productId,
+        float $quantity,
+        ?int $batchId = null
+    ): InventoryStock {
+        return DB::transaction(function () use ($warehouseId, $locationId, $productId, $quantity, $batchId) {
+            $stock = InventoryStock::where('warehouse_id', $warehouseId)
+                ->where('storage_location_id', $locationId)
+                ->where('product_id', $productId)
+                ->where('product_batch_id', $batchId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$stock) {
+                throw new InvalidArgumentException("No stock record found to release reservation.");
+            }
+
+            $stock->quantity_reserved = max(0.0, (float) $stock->quantity_reserved - $quantity);
+            $stock->save();
+
+            return $stock;
         });
     }
 }
